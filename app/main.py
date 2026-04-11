@@ -34,6 +34,11 @@ def ingest_log():
     conn.close()
     return jsonify({"message": "Log ingested"}), 201
 
+@app.route('/alerts', methods=['GET'])
+def get_alerts():
+    from detectors import detect_brute_force
+    alerts = detect_brute_force()
+    return jsonify({"alerts": alerts})
+
 if __name__ == '__main__':
     app.run(debug=True)
-    
