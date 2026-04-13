@@ -39,3 +39,32 @@ def detect_brute_force():
         })
 
     return alerts
+def detect_credential_stuffing():
+    conn = get_db()
+    cur = conn.cursor()
+
+    window = datetime.utcnow() - timedelta(minutes=10)
+
+    cur.execute("""
+        SELECT ip_address, COUNT(DISTINCT username) as username_count
+        FROM auth_logs
+        WHERE status = 'failure'
+        AND timestamp >= %s
+        GROUP BY ip_address
+        HAVING COUNT(DISTINCT username) >= 5
+    """, (window,))
+
+    results = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    alerts = []
+    for row in results:
+        alerts.append({
+            "type": "credential_stuffing",
+            "ip_address": row[0],
+            "username_count": row[1],
+            "message": f"Credential stuffing detected from {row[0]}: {row[1]} unique usernames tried in 10 minutes"
+        })
+
+    return alerts
