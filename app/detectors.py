@@ -68,3 +68,29 @@ def detect_credential_stuffing():
         })
 
     return alerts
+def detect_suspicious_login_times():
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT ip_address, username, timestamp
+        FROM auth_logs
+        WHERE EXTRACT(HOUR FROM timestamp) < 6
+        OR EXTRACT(HOUR FROM timestamp) > 22
+    """)
+
+    results = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    alerts = []
+    for row in results:
+        alerts.append({
+            "type": "suspicious_login_time",
+            "ip_address": row[0],
+            "username": row[1],
+            "timestamp": str(row[2]),
+            "message": f"Suspicious login from {row[0]}: {row[1]} at {row[2]}"
+        })
+
+    return alerts
