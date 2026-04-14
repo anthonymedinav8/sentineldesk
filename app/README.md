@@ -1,6 +1,6 @@
 # SentinelDesk
 
-SentinelDesk is a security API that monitors authentication logs and detectsbrute force attacks, credential stuffing, and suspicious login times.
+SentinelDesk is a security API that monitors authentication logs and detects brute force attacks, credential stuffing, and suspicious login times.
 ## Tech Stach
 -Python 3.14
 -Flask
