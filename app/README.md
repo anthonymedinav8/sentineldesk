@@ -14,7 +14,7 @@ SentinelDesk is a security API that monitors authentication logs and detects bru
 
 ## Endpoints
 - 'POST /logs' - ingest an authentication log entry
-- GET 7allerts' - returs all active security alerts
+- GET 7allerts' - returns all active security alerts
 
 ## SETUP
 1. Clone the repo

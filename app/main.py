@@ -36,8 +36,8 @@ def ingest_log():
 
 @app.route('/alerts', methods=['GET'])
 def get_alerts():
-    from detectors import detect_brute_force, detect_credential_stuffing
-    alerts = detect_brute_force() + detect_credential_stuffing()
+    from detectors import detect_brute_force, detect_credential_stuffing, detect_suspicious_login_times
+    alerts = detect_brute_force() + detect_credential_stuffing() + detect_suspicious_login_times
     return jsonify({"alerts": alerts})
 
 if __name__ == '__main__':
