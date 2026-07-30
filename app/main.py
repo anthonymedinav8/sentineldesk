@@ -41,4 +41,4 @@ def get_alerts():
     return jsonify({"alerts": alerts})
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=5001, threaded=True) 

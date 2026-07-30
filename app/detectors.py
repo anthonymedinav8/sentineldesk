@@ -96,4 +96,3 @@ def detect_suspicious_login_times():
         })
 
     return alerts
-psql -U postgres -d sentineldesk
