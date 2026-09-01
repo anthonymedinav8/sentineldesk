@@ -1,44 +1,49 @@
-from flask import Flask, request, jsonify
-from dotenv import load_dotenv
-import psycopg2
 import os
+
+from dotenv import load_dotenv
+from flask import Flask, jsonify, request
+
+from app.db import execute
+from app.detectors import run_all_detectors
 
 load_dotenv()
 
 app = Flask(__name__)
 
-def get_db():
-    conn = psycopg2.connect(
-        dbname="sentineldesk",
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        host="localhost"
-    )
-    return conn
+REQUIRED_LOG_FIELDS = ("timestamp", "username", "ip_address", "status", "raw_log")
 
-@app.route('/')
+
+@app.route("/")
 def index():
     return jsonify({"status": "SentinelDesk running"})
 
-@app.route('/logs', methods=['POST'])
+
+@app.route("/logs", methods=["POST"])
 def ingest_log():
-    data = request.get_json()
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO auth_logs (timestamp, username, ip_address, status, raw_log) VALUES (%s, %s, %s, %s, %s)",
-        (data['timestamp'], data['username'], data['ip_address'], data['status'], data['raw_log'])
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+
+    missing = [field for field in REQUIRED_LOG_FIELDS if field not in data]
+    if missing:
+        return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
+
+    execute(
+        """
+        INSERT INTO auth_logs (timestamp, username, ip_address, status, raw_log)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        tuple(data[field] for field in REQUIRED_LOG_FIELDS),
     )
-    conn.commit()
-    cur.close()
-    conn.close()
     return jsonify({"message": "Log ingested"}), 201
 
-@app.route('/alerts', methods=['GET'])
-def get_alerts():
-    from detectors import detect_brute_force, detect_credential_stuffing, detect_suspicious_login_times
-    alerts = detect_brute_force() + detect_credential_stuffing() + detect_suspicious_login_times
-    return jsonify({"alerts": alerts})
 
-if __name__ == '__main__':
-    app.run(debug=True, port=5001, threaded=True) 
+@app.route("/alerts", methods=["GET"])
+def get_alerts():
+    alerts = run_all_detectors()
+    return jsonify({"alerts": alerts, "count": len(alerts)})
+
+
+if __name__ == "__main__":
+    debug = os.getenv("FLASK_DEBUG", "0") == "1"
+    app.run(debug=debug, port=int(os.getenv("PORT", "5001")), threaded=True)

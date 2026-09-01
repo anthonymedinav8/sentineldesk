@@ -1,98 +1,122 @@
-from datetime import datetime, timedelta
-import psycopg2
-import os
+from datetime import datetime, timedelta, timezone
 
-def get_db():
-    return psycopg2.connect(
-        dbname="sentineldesk",
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        host="localhost"
-    )
+from app.db import fetch_all
+
+BRUTE_FORCE_WINDOW_MINUTES = 10
+BRUTE_FORCE_THRESHOLD = 5
+
+CREDENTIAL_STUFFING_WINDOW_MINUTES = 30
+CREDENTIAL_STUFFING_THRESHOLD = 3
+
+SUSPICIOUS_TIME_WINDOW_HOURS = 24
+SUSPICIOUS_TIME_THRESHOLD = 2
+QUIET_HOURS_START = 22
+QUIET_HOURS_END = 6
+
+
+def _window(**kwargs):
+    """Return the timezone aware cutoff for a detection window."""
+    return datetime.now(timezone.utc) - timedelta(**kwargs)
+
 
 def detect_brute_force():
-    conn = get_db()
-    cur = conn.cursor()
-
-    window = datetime.utcnow() - timedelta(minutes=10)
-
-    cur.execute("""
-        SELECT ip_address, COUNT(*) as attempt_count
+    """Many failed logins from one IP in a short window."""
+    rows = fetch_all(
+        """
+        SELECT ip_address, COUNT(*) AS attempt_count
         FROM auth_logs
         WHERE status = 'failure'
-        AND timestamp >= %s
+          AND timestamp >= %s
         GROUP BY ip_address
-        HAVING COUNT(*) >= 5
-    """, (window,))
+        HAVING COUNT(*) >= %s
+        """,
+        (_window(minutes=BRUTE_FORCE_WINDOW_MINUTES), BRUTE_FORCE_THRESHOLD),
+    )
 
-    results = cur.fetchall()
-    cur.close()
-    conn.close()
-
-    alerts = []
-    for row in results:
-        alerts.append({
+    return [
+        {
             "type": "brute_force",
-            "ip_address": row[0],
-            "attempt_count": row[1],
-            "message": f"Brute force detected from {row[0]}: {row[1]} failed attempts in 10 minutes"
-        })
+            "ip_address": ip,
+            "attempt_count": count,
+            "message": (
+                f"Brute force detected from {ip}: {count} failed attempts "
+                f"in {BRUTE_FORCE_WINDOW_MINUTES} minutes"
+            ),
+        }
+        for ip, count in rows
+    ]
 
-    return alerts
+
 def detect_credential_stuffing():
-    conn = get_db()
-    cur = conn.cursor()
-
-    window = datetime.utcnow() - timedelta(minutes=30)
-
-    cur.execute("""
-        SELECT ip_address, COUNT(DISTINCT username) as username_count
+    """One IP failing against many different usernames."""
+    rows = fetch_all(
+        """
+        SELECT ip_address, COUNT(DISTINCT username) AS username_count
         FROM auth_logs
         WHERE status = 'failure'
-        AND timestamp >= %s
+          AND timestamp >= %s
         GROUP BY ip_address
-        HAVING COUNT(DISTINCT username) >= 3
-    """, (window,))
+        HAVING COUNT(DISTINCT username) >= %s
+        """,
+        (
+            _window(minutes=CREDENTIAL_STUFFING_WINDOW_MINUTES),
+            CREDENTIAL_STUFFING_THRESHOLD,
+        ),
+    )
 
-    results = cur.fetchall()
-    cur.close()
-    conn.close()
-
-    alerts = []
-    for row in results:
-        alerts.append({
+    return [
+        {
             "type": "credential_stuffing",
-            "ip_address": row[0],
-            "username_count": row[1],
-            "message": f"Credential stuffing detected from {row[0]}: {row[1]} unique usernames tried in 30 minutes"
-    })
+            "ip_address": ip,
+            "username_count": count,
+            "message": (
+                f"Credential stuffing detected from {ip}: {count} unique "
+                f"usernames tried in {CREDENTIAL_STUFFING_WINDOW_MINUTES} minutes"
+            ),
+        }
+        for ip, count in rows
+    ]
 
-    return alerts
+
 def detect_suspicious_login_times():
-    conn = get_db()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT ip_address, COUNT(*) as attempt_count
+    """Repeated failures during quiet hours, bounded to a recent window."""
+    rows = fetch_all(
+        """
+        SELECT ip_address, COUNT(*) AS attempt_count
         FROM auth_logs
-        WHERE (EXTRACT(HOUR FROM timestamp) < 6
-        OR EXTRACT(HOUR FROM timestamp) > 22)
-        AND status = 'failure'
+        WHERE status = 'failure'
+          AND timestamp >= %s
+          AND (EXTRACT(HOUR FROM timestamp) < %s
+               OR EXTRACT(HOUR FROM timestamp) > %s)
         GROUP BY ip_address
-        HAVING COUNT(*) >= 2
-    """)
+        HAVING COUNT(*) >= %s
+        """,
+        (
+            _window(hours=SUSPICIOUS_TIME_WINDOW_HOURS),
+            QUIET_HOURS_END,
+            QUIET_HOURS_START,
+            SUSPICIOUS_TIME_THRESHOLD,
+        ),
+    )
 
-    results = cur.fetchall()
-    cur.close()
-    conn.close()
-
-    alerts = []
-    for row in results:
-        alerts.append({
+    return [
+        {
             "type": "suspicious_login_time",
-            "ip_address": row[0],
-            "attempt_count": row[1],
-            "message": f"Suspicious login from {row[0]}: {row[1]} attempts"
-        })
+            "ip_address": ip,
+            "attempt_count": count,
+            "message": (
+                f"Suspicious login from {ip}: {count} failed attempts "
+                f"outside {QUIET_HOURS_END}:00 to {QUIET_HOURS_START}:00"
+            ),
+        }
+        for ip, count in rows
+    ]
 
-    return alerts
+
+def run_all_detectors():
+    """Run every detector and return one combined list of alerts."""
+    return (
+        detect_brute_force()
+        + detect_credential_stuffing()
+        + detect_suspicious_login_times()
+    )
